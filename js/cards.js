@@ -58,11 +58,12 @@ cards.isCardDisplayed = function(mid) {
  * @param {Object} entity Freebase topic/entity.
  */
 cards.displayCard = function(entity) {
+  console.log(entity)
+  var cardContent;
   $('.card').show();
-  $('.card').attr('data-mid', entity.id);
   var cardContent = {
     'name': entity.property['/type/object/name'].values[0].value,
-    'description': entity.property['/common/topic/description'].values[0].text,
+    'description': '',
     'notableFor': '',
     'image': 'images/none.gif',
     'actionUrl': '',
@@ -70,6 +71,10 @@ cards.displayCard = function(entity) {
     'films': [{'text': '', url: ''}],
     'filmsDisplay': 'false'
   };
+  if (entity.property['/common/topic/description']) {
+    cardContent['notableFor'] = entity.property['/common/topic/description']
+        .values[0].text;
+  }
   if (entity.property['/common/topic/notable_for']) {
     cardContent['notableFor'] = entity.property['/common/topic/notable_for']
         .values[0].text;
@@ -104,4 +109,56 @@ cards.displayCard = function(entity) {
     cardContent['filmsDisplay'] = true;
   }
   $('div.card').render(cardContent, cards.CARD_TEMPLATE);
+  $('.card').attr('data-mid', entity.id);
+};
+
+
+/**
+ * Used by pure.js to populate the template.
+ * @type {Object.<string>}
+ * @const
+ */
+cards.PLACES_MAPPING_DIRECTIVE = {
+  '.action': 'actionText',
+  '.action@href': 'actionUrl',
+  '.address': 'address',
+  '.image@src': 'image',
+  '.name': 'name',
+  '.phone': 'phone',
+  '.reviews-number': 'reviewsNumber',
+  '.rating': 'rating',
+  '.price': 'price'
+};
+
+
+/**
+ * Compiled purejs template for a card.
+ * @type {Function}
+ * @const
+ */
+cards.PLACES_CARD_TEMPLATE = $('div.places-card').compile(
+    cards.PLACES_MAPPING_DIRECTIVE);
+
+
+/**
+ * Displays a card.
+ * @param {Object} place Google Places API result.
+ */
+cards.displayPlacesCard = function(place) {
+  var cardContent;
+  $('.places-card').show();
+  $('.places-card').attr('data-reference', place.reference);
+  var cardContent = {
+    'name': place.name,
+    'actionUrl': place.website,
+    'actionText': 'Visit official website',
+    'address': place.formatted_address,
+    'phone': place.international_phone_number,
+    'price': place.price_level,
+    'rating': place.rating,
+    'reviewsNumber': place.reviews.length,
+    'image': 'images/none.gif'
+  };
+
+  $('div.places-card').render(cardContent, cards.PLACES_CARD_TEMPLATE);
 };

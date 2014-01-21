@@ -40,6 +40,14 @@ a {
   text-decoration: none;
 }
 
+.places-card {
+  background-color: #D1E1F7;
+}
+
+.card {
+  background-color: #F7CAC6;
+}
+
 #footer {
   z-index: 99;
   width: 100%;
@@ -64,9 +72,13 @@ a {
     &.error {
       color: red;
     }
+
+    &:empty {
+      display: none;
+    }
   }
 
-  img {
+  img.github {
     position: absolute;
     bottom: 1.5em;
     right: 1em;

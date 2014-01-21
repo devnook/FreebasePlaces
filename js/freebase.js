@@ -7,13 +7,21 @@
  * Namespace.
  */
 var fbmap = {
+  apiKey: 'AIzaSyA--BfDpMn2dJWZOssuXQhrhODwCH0exvY',
   map: null,
   currentLatLng: null,
   markers: [], //Keep track of currently displayed markers.
   searchUrl: 'https://www.googleapis.com/freebase/v1/search',
   topicUrl: 'https://www.googleapis.com/freebase/v1/topic/',
-  category: '/symbols/namesake',
-  locString: '/location/location/geolocation'
+  reconcileUrl: 'https://www.googleapis.com/freebase/v1/reconcile',
+  category: '/dining/restaurant',
+  locString: '/location/location/geolocation',
+  icons: {
+    reconciled: 'http://mt.googleapis.com/vt/icon/name=icons/spotlight/' +
+        'spotlight-ad.png&scale=1',
+    places: 'http://mt.googleapis.com/vt/icon/name=icons/spotlight/' +
+        'spotlight-waypoint-blue.png&scale=1',
+  }
 };
 
 
@@ -39,104 +47,141 @@ fbmap.initMap = function(lat, lng) {
     center: new google.maps.LatLng(lat, lng),
     mapTypeId: google.maps.MapTypeId.ROADMAP
   };
-
   fbmap.currentLatLng = mapOptions.center;
-
   fbmap.map = new google.maps.Map($('#map-canvas')[0], mapOptions);
-  // Query for new features on a click.  TODO(jlivni): Maybe query on a pan.
+
+  // Query for new features on a click.
   google.maps.event.addListener(fbmap.map, 'click', function(e) {
     fbmap.currentLatLng = e.latLng;
+    fbmap.clearMap();
     fbmap.getFreebaseLocations();
+    fbmap.getPlacesLocations();
   });
 
-  // Listen for changes on which category to query.  TODO(jlivni): Consider
-  // multiple categories.
-  $('#category').change(function() {
-    $('.card').hide();
-    fbmap.category = $(this).val();
-    fbmap.getFreebaseLocations();
-  });
-
-  // Put the dropdown on the map div.
-  var categoryEl = $('#category')[0];
-  fbmap.map.controls[google.maps.ControlPosition.TOP_LEFT].push(categoryEl);
-
+  fbmap.clearMap();
   fbmap.getFreebaseLocations();
+  fbmap.getPlacesLocations();
 };
 
-
-/**
- * Sprite locations used to render map markets for categories.
- * @type {Object.<google.maps.Point>}
- * @const
- */
-fbmap.allCategories = [
-  '/symbols/namesake',
-  '/film/film_location',
-  '/visual_art/artwork',
-  '/architecture/structure',
-  '/travel/tourist_attraction',
-  '/sports/sports_facility'
-];
-
+// This wrapper function allows to pass additional argument, 'category'.
+fbmap.createMarkers = function(response) {
+      if (!response.result) {
+        fbmap.setFlash('No results found for this area.', 'error');
+      }
+      var bounds = new google.maps.LatLngBounds();
+      $.each(response.result, function(i, result) {
+        var loc = result.output[fbmap.locString][fbmap.locString][0];
+        var latLng = new google.maps.LatLng(loc.latitude, loc.longitude);
+        var marker = new google.maps.Marker({
+          position: latLng,
+          map: fbmap.map,
+          title: result.name
+        });
+        fbmap.markers.push(marker);
+        // Keep track of the bounding box of all results.
+        bounds.extend(latLng);
+        google.maps.event.addListener(marker, 'click', function() {
+          $('.places-card').hide();
+          if (!cards.isCardDisplayed(result.mid)) {
+            var params = {
+              filter: 'allproperties'
+            };
+            $.getJSON(fbmap.topicUrl + result.mid, cards.displayCard);
+          }
+        });
+      });
+      if (response.result.length > 1) {
+        fbmap.map.fitBounds(bounds);
+      }
+  };
 
 /**
  * Queries for new freebase locations.
  */
 fbmap.getFreebaseLocations = function() {
   var latLng = fbmap.currentLatLng;
-  fbmap.clearMap();
-  var categories = fbmap.category == 'all' ?
-      fbmap.allCategories : [fbmap.category];
-  for (var i = 0, category; category = categories[i]; i++) {
-    // Create the Freebase API query.
-    var loc = ' lon:' + latLng.lng() + ' lat:' + latLng.lat();
-    loc = '(all type:' + category + ' (within radius:50000ft' +
-        loc + '))';
-    var params = {
-      filter: loc,
-      output: '(' + fbmap.locString + ')'
-    };
-    // This wrapper function allows to pass additional argument, 'category'.
-    var createMarkers = function(category) {
-      return function(response) {
-        if (!response.result) {
-          fbmap.setFlash('No results found for this area.', 'error');
-        }
-        var bounds = new google.maps.LatLngBounds();
-        $.each(response.result, function(i, result) {
-          var loc = result.output[fbmap.locString][fbmap.locString][0];
-          var latLng = new google.maps.LatLng(loc.latitude, loc.longitude);
-          // TODO(jivni): Use custom icons depending on the category.
-          var icon = new google.maps.MarkerImage(
-            'images/maki-sprite.png',
-            new google.maps.Size(24, 24),
-            fbmap.iconAnchorPoints[category]);
-          var marker = new google.maps.Marker({
-            position: latLng,
-            map: fbmap.map,
-            title: result.name,
-            icon: icon
-          });
-          fbmap.markers.push(marker);
-          // Keep track of the bounding box of all results.
-          bounds.extend(latLng);
+  // Create the Freebase API query.
+  var loc = ' lon:' + latLng.lng() + ' lat:' + latLng.lat();
+  loc = '(all type:' + fbmap.category + ' (within radius:50000ft' +
+      loc + '))';
+  var params = {
+    filter: loc,
+    output: '(' + fbmap.locString + ')'
+  };
+  $.getJSON(fbmap.searchUrl, params, fbmap.createMarkers);
+};
+
+
+fbmap.nearbySearchCallback = function(results, status) {
+  if (status == google.maps.places.PlacesServiceStatus.OK) {
+    for (var i = 0, result; result = results[i]; i++) {
+      var marker = new google.maps.Marker({
+        map: fbmap.map,
+        position: result.geometry.location,
+        icon: fbmap.icons.places
+      });
+      marker.result = result;
+
+      // Create Freebase Reconcile query
+      var reconcileUrl = fbmap.reconcileUrl + '?key=' + fbmap.apiKey +
+          '&kind=' + fbmap.category + '&name=';
+      var name = result.name.replace(' ', '+');
+
+      // This wrapper function allows to pass additional argument, 'category'.
+      var reconcileMarker = function(marker) {
+        return function(response) {
+          if (!response.candidate) {
+            return;
+          }
+          marker.setIcon(fbmap.icons.reconciled);
+          marker.mid = response.candidate[0].mid;
           google.maps.event.addListener(marker, 'click', function() {
-            if (!cards.isCardDisplayed(result.mid)) {
+            if (!cards.isCardDisplayed(marker.mid)) {
+              $('.card').hide();
               var params = {
                 filter: 'allproperties'
               };
-              $.getJSON(fbmap.topicUrl + result.mid, cards.displayCard);
+              $.getJSON(
+                  fbmap.topicUrl + response.candidate[0].mid,
+                  cards.displayCard);
             }
           });
-        });
-        if (response.result.length > 1) {
-          fbmap.map.fitBounds(bounds);
         }
       };
-    };
-    $.getJSON(fbmap.searchUrl, params, createMarkers(category));
+      $.get(reconcileUrl+name, reconcileMarker(marker));
+
+      google.maps.event.addListener(marker, 'click', function() {
+        if (this.mid !== $('.card').attr('data-mid')) {
+          $('.card').hide();
+        }
+        var request = {
+          reference: this.result.reference
+        };
+        service = new google.maps.places.PlacesService(fbmap.map);
+        service.getDetails(request, callback);
+        function callback(place, status) {
+          if (status == google.maps.places.PlacesServiceStatus.OK) {
+            cards.displayPlacesCard(place);
+          }
+        }
+      });
+    }
   }
+};
+
+
+/**
+ * Queries for new Places API locations.
+ */
+fbmap.getPlacesLocations = function() {
+  var latLng = fbmap.currentLatLng;
+  var request = {
+    location: fbmap.currentLatLng,
+    radius: '50000',
+    types: ['restaurant']
+  };
+  var service = new google.maps.places.PlacesService(fbmap.map);
+  service.nearbySearch(request, fbmap.nearbySearchCallback);
 };
 
 
@@ -150,19 +195,4 @@ fbmap.clearMap = function() {
   });
   fbmap.markers = [];
   $('.card').hide();
-};
-
-
-/**
- * Sprite locations used to render map markets for categories.
- * @type {Object.<google.maps.Point>}
- * @const
- */
-fbmap.iconAnchorPoints = {
-  '/symbols/namesake': new google.maps.Point(108, 240),
-  '/film/film_location': new google.maps.Point(108, 312),
-  '/visual_art/artwork': new google.maps.Point(216, 168),
-  '/architecture/structure' : new google.maps.Point(216, 144),
-  '/travel/tourist_attraction': new google.maps.Point(54, 504),
-  '/sports/sports_facility': new google.maps.Point(162, 192)
 };
